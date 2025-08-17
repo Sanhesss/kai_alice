@@ -6,7 +6,11 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI()
 
-@app.post("/")
+@app.get("/")
+async def health():
+    return {"ok": True}
+
+@app.post("/alice")
 async def handle(request: Request):
     body = await request.json()
     user_text = body['request']['original_utterance']
