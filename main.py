@@ -4,22 +4,21 @@ import asyncio
 from fastapi import FastAPI, Request
 from openai import OpenAI
 
-# ------------- инициализация OpenAI -------------
+# Инициализация OpenAI
 api_key = os.getenv("OPENAI_API_KEY")
 print("ENV OPENAI_API_KEY exists:", bool(api_key), flush=True)
 client = OpenAI(api_key=api_key)
 
 app = FastAPI()
 
-
-# ------------- health & debug -------------
+# ---- health ----
 @app.get("/")
 async def health():
     return {"ok": True}
 
+# ---- быстрый самотест без Алисы ----
 @app.get("/debug-openai")
 async def debug_openai():
-    """Простая проверка соединения с OpenAI (без Алисы)."""
     try:
         r = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -28,28 +27,27 @@ async def debug_openai():
                 {"role": "user", "content": "Скажи слово ПИНГ."},
             ],
             temperature=0.0,
+            max_tokens=16,
         )
-        txt = r.choices[0].message.content.strip()
-        return {"ok": True, "reply": txt}
+        return {"ok": True, "reply": r.choices[0].message.content.strip()}
     except Exception as e:
         return {"ok": False, "error": repr(e)}
 
-
-# ------------- синхронный вызов GPT -------------
+# ---- синхронный вызов GPT ----
 def ask_gpt_sync(prompt: str) -> str:
     system = "Ты дружелюбный русскоязычный ассистент по имени Кай. Отвечай кратко и по делу."
     r = client.chat.completions.create(
-        model="gpt-4o-mini",  # быстрый и дешёвый
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
         temperature=0.7,
+        max_tokens=64,   # ограничиваем длину, чтобы ответ приходил быстрее
     )
     return r.choices[0].message.content.strip()
 
-
-# ------------- обработчик Алисы -------------
+# ---- обработчик Алисы ----
 @app.post("/alice")
 async def alice_handle(request: Request):
     body = await request.json()
@@ -57,8 +55,6 @@ async def alice_handle(request: Request):
 
     req = (body.get("request") or {})
     user_text = (req.get("original_utterance") or req.get("command") or "").strip()
-
-    # запасной вариант — собрать текст из nlu.tokens
     if not user_text:
         nlu = (req.get("nlu") or {})
         tokens = nlu.get("tokens") or []
@@ -67,7 +63,7 @@ async def alice_handle(request: Request):
 
     print("USER_TEXT:", repr(user_text), flush=True)
 
-    # выход
+    # выход по ключевым словам
     if user_text.lower() in {"выход", "стоп", "хватит"}:
         reply = "До связи! Зови, если что."
         return {
@@ -83,12 +79,11 @@ async def alice_handle(request: Request):
             "response": {"text": reply, "tts": reply, "end_session": False},
         }
 
-    # вызов GPT с понятным логом
+    # вызов GPT с таймаутом ~3.5с
     try:
-        # Яндекс даёт ~3–3.5 с. Ставим 3.0 — баланс скорости и стабильности
         reply = await asyncio.wait_for(
             asyncio.to_thread(ask_gpt_sync, user_text),
-            timeout=3.0
+            timeout=3.5
         )
     except asyncio.TimeoutError:
         print("OPENAI TIMEOUT", flush=True)
